@@ -1,0 +1,5 @@
+version: "1.0"
+
+globalSettings:
+  model: sonnet
+  timeout: 600000
