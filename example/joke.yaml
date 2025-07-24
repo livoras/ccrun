@@ -1,0 +1,8 @@
+name: "JOKE"
+type: crontab
+crontab: "*/5 * * * * *"  # Every 5 seconds
+
+run:
+  - task("joke " + Date.now(), "", ['joke'])
+  - agent(random-joke, "随便讲就行")
+  - stop-trigger.ts  # Stop after first execution

@@ -200,8 +200,9 @@ class Pipeline {
     let cmdFile = '';
     let cmdArgs = parts;
     
-    // Check if first part looks like a file (ends with .md, .txt, etc.)
-    if (parts.length > 0 && parts[0].match(/\.\w+$/)) {
+    // Check if the entire content is quoted (direct command mode)
+    // If not quoted, treat first part as file
+    if (parts.length > 0 && !content.startsWith('"') && !content.startsWith("'")) {
       isFile = true;
       cmdFile = parts[0];
       cmdArgs = parts.slice(1);
