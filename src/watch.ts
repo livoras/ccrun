@@ -1,27 +1,22 @@
 import { parse } from 'yaml';
 import { readFile } from 'fs/promises';
-import { get } from 'http';
 import { resolve, dirname } from 'path';
 import { pathToFileURL } from 'url';
 import { runCC } from './cc-core';
 import { ActionClient } from './action-client';
-
-interface Config {
-  sse: string;
-  run: string[];
-}
-
-interface ProcessorFunction {
-  (data: any, next: (data: any) => void, taskId?: string): void;
-}
+import { Config, ProcessorFunction } from './types';
+import { createTrigger, Trigger } from './triggers';
 
 class Pipeline {
   private processors: Array<{ type: 'function' | 'command' | 'task', handler: ProcessorFunction | string }> = [];
   private configPath: string;
   private actionClient: ActionClient;
   private currentTaskId?: string;
+  private config: Config;
+  private trigger?: Trigger;
 
-  constructor(private config: Config, configPath: string) {
+  constructor(config: Config, configPath: string) {
+    this.config = config;
     this.configPath = configPath;
     this.actionClient = new ActionClient();
   }
@@ -350,51 +345,30 @@ class Pipeline {
   }
   
 
-  listenToSSE() {
-    console.log(`Connecting to SSE: ${this.config.sse}`);
+  start() {
+    // Create and start the appropriate trigger
+    this.trigger = createTrigger(this.config);
     
-    get(this.config.sse, (res) => {
-      console.log('SSE connection established');
-      
-      let buffer = '';
-      
-      res.on('data', (chunk) => {
-        buffer += chunk.toString();
-        const lines = buffer.split('\n');
-        
-        // Keep the last incomplete line in buffer
-        buffer = lines.pop() || '';
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const message = line.slice(6).trim();
-            if (message) {
-              try {
-                const data = JSON.parse(message);
-                console.log('Received SSE data:', data);
-                this.execute(data).catch(err => {
-                  console.error('Pipeline execution error:', err);
-                });
-              } catch (err) {
-                console.error('Failed to parse SSE message:', message, err);
-              }
-            }
-          }
-        }
-      });
-      
-      res.on('error', (error) => {
-        console.error('SSE error:', error);
-      });
-      
-      res.on('end', () => {
-        console.log('SSE connection closed');
-        process.exit(0);
-      });
-    }).on('error', (error) => {
-      console.error('Connection error:', error);
-      process.exit(1);
+    console.log(`[Pipeline] Starting trigger: ${this.config.name}`);
+    if (this.config.description) {
+      console.log(`[Pipeline] Description: ${this.config.description}`);
+    }
+    
+    // Start the trigger with our execute callback
+    this.trigger.start(async (data) => {
+      try {
+        await this.execute(data);
+      } catch (err) {
+        console.error('[Pipeline] Execution error:', err);
+      }
     });
+  }
+  
+  stop() {
+    if (this.trigger) {
+      console.log(`[Pipeline] Stopping trigger: ${this.config.name}`);
+      this.trigger.stop();
+    }
   }
 }
 
@@ -403,32 +377,75 @@ async function main() {
   
   if (!configFile) {
     console.error('Usage: watch <config.yaml>');
+    console.error('\nExample config formats:');
+    console.error('  SSE mode:     type: sse, sse: <url>');
+    console.error('  Crontab mode: type: crontab, crontab: "*/5 * * * *"');
     process.exit(1);
   }
   
   try {
     const configPath = resolve(process.cwd(), configFile);
     const configContent = await readFile(configPath, 'utf-8');
-    const config = parse(configContent) as Config;
+    let config = parse(configContent) as any;
     
-    if (!config.sse || !config.run || !Array.isArray(config.run)) {
-      throw new Error('Invalid config format. Expected "sse" and "run" fields.');
+    // Add config file path to the config
+    config.configPath = configPath;
+    
+    // Backward compatibility: if no type field, assume SSE mode
+    if (!config.type && config.sse) {
+      console.log('[Pipeline] No type specified, assuming SSE mode for backward compatibility');
+      config.type = 'sse';
+      // Set default name if not provided
+      if (!config.name) {
+        config.name = 'Legacy SSE Pipeline';
+      }
     }
     
-    const pipeline = new Pipeline(config, configPath);
+    // Validate required fields
+    if (!config.run || !Array.isArray(config.run)) {
+      throw new Error('Invalid config: "run" field must be an array');
+    }
+    
+    if (!config.type) {
+      throw new Error('Invalid config: "type" field is required (sse, crontab, or watch)');
+    }
+    
+    if (!config.name) {
+      throw new Error('Invalid config: "name" field is required');
+    }
+    
+    // Type-specific validation
+    switch (config.type) {
+      case 'sse':
+        if (!config.sse) {
+          throw new Error('SSE config requires "sse" field with URL');
+        }
+        break;
+      case 'crontab':
+        if (!config.crontab) {
+          throw new Error('Crontab config requires "crontab" field with cron expression');
+        }
+        break;
+      default:
+        throw new Error(`Unknown trigger type: ${config.type}`);
+    }
+    
+    const pipeline = new Pipeline(config as Config, configPath);
     await pipeline.loadProcessors();
     
-    console.log(`Loaded ${config.run.length} processors`);
+    console.log(`[Pipeline] Loaded ${config.run.length} processors`);
     
     // Handle graceful shutdown
     process.on('SIGINT', () => {
-      console.log('\nShutting down...');
+      console.log('\n[Pipeline] Shutting down...');
+      pipeline.stop();
       process.exit(0);
     });
     
-    pipeline.listenToSSE();
+    // Start the pipeline with the configured trigger
+    pipeline.start();
   } catch (error) {
-    console.error('Failed to start:', error);
+    console.error('[Pipeline] Failed to start:', error);
     process.exit(1);
   }
 }

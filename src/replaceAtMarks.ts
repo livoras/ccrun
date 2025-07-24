@@ -112,7 +112,7 @@ function resolveFilePath(filename: string, currentFilePath?: string): string {
 function replaceSquareBrackets(prompt: string, currentFilePath?: string): string {
   const regex = /@\[([^\]]+)\]/g;
   
-  return prompt.replace(regex, (match, content) => {
+  return prompt.replace(regex, (_match, content) => {
     // Parse the command content
     const trimmed = content.trim();
     

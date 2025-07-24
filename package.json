@@ -20,12 +20,16 @@
   "description": "",
   "devDependencies": {
     "@types/node": "^24.1.0",
+    "@types/node-cron": "^3.0.11",
     "@vitest/ui": "^3.2.4",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@instantlyeasy/claude-code-sdk-ts": "^0.3.3",
+    "chokidar": "^4.0.3",
+    "node-cron": "^4.2.1",
     "yaml": "^2.8.0"
   }
 }

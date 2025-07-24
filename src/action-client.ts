@@ -19,7 +19,7 @@ export class ActionClient {
       body: body ? JSON.stringify(body) : undefined,
     });
     
-    const result = await response.json();
+    const result = await response.json() as { error?: string };
     
     if (!response.ok) {
       throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);

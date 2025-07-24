@@ -1,0 +1,7 @@
+name: test cron
+type: crontab
+crontab: "*/10 * * * * *"  # Every 10 seconds
+description: Test cron trigger every 10 seconds
+
+run:
+  - log.ts
