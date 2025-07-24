@@ -23,6 +23,7 @@ async function main() {
   let prompt = '';
   let taskId = '';
   let filePath = '';
+  let userInput = '';
   
   // 查找 prompt、-f 和 --taskId 参数
   for (let i = 0; i < args.length; i++) {
@@ -34,13 +35,18 @@ async function main() {
       i++; // 跳过下一个参数
     } else if (!prompt && !filePath) {
       prompt = args[i];
+    } else if (filePath && !userInput) {
+      // 如果已经指定了文件，额外的参数作为用户输入
+      userInput = args[i];
     }
   }
   
   // 如果指定了文件，从文件读取内容
   if (filePath) {
     try {
-      prompt = await fs.readFile(filePath, 'utf-8');
+      const fileContent = await fs.readFile(filePath, 'utf-8');
+      // 如果有用户输入，组合文件内容和用户输入
+      prompt = userInput ? `${fileContent}\n\n<userInput>${userInput}</userInput>` : fileContent;
     } catch (error) {
       console.error(`Error reading file: ${filePath}`, error);
       process.exit(1);
@@ -50,6 +56,7 @@ async function main() {
   if (!prompt) {
     console.error('Usage: cc "<prompt>" [--taskId <taskId>]');
     console.error('   or: cc -f <filename> [--taskId <taskId>]');
+    console.error('   or: cc -f <filename> "<user input>" [--taskId <taskId>]');
     process.exit(1);
   }
   
@@ -61,7 +68,9 @@ async function main() {
 
 注意，当前的 taskId 是 ${taskId}。如果
 
-1. 需要用到 \`./ccc\` 命令的 Bash 命令，请传入 \`./ccc <xxx> --taskId ${taskId})\`。
+1. 需要用到 \`cc\` 命令的 Bash 命令:
+  1. 直接传入字符串，要有单引号 \`cc '<xxx>' --taskId ${taskId})\`。 
+  2. 调用文件，\`cc -f filename --taskId ${taskId} \`
 2. 如果需要用到 mcp__flow__executeAction 请也使用 taskId`;
   }
 
