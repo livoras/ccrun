@@ -1,5 +1,6 @@
 import { claude } from '@instantlyeasy/claude-code-sdk-ts';
 import { remoteConsole } from './logger';
+import { replaceAtMarks } from './replaceAtMarks';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -60,18 +61,18 @@ async function main() {
     process.exit(1);
   }
   
-  // 如果有 taskId，构造包含任务上下文的完整 prompt
+  // 解析并替换 @{} 标记
+  prompt = replaceAtMarks(prompt, { taskId });
+  
+  console.log('--------->', prompt)
+  
+  // 如果有 taskId，添加说明
   if (taskId) {
     prompt = `${prompt}
 
 --
 
-注意，当前的 taskId 是 ${taskId}。如果
-
-1. 需要用到 \`cc\` 命令的 Bash 命令:
-  1. 直接传入字符串，要有单引号 \`cc '<xxx>' --taskId ${taskId})\`。 
-  2. 调用文件，\`cc -f filename --taskId ${taskId} \`
-2. 如果需要用到 mcp__flow__executeAction 请也使用 taskId`;
+注意，当前的 taskId 是 ${taskId}。如果需要用到 mcp__flow__executeAction 请也使用 taskId`;
   }
 
   const abort = new AbortController()
