@@ -1,0 +1,7 @@
+sse: http://localhost:8081/events
+
+run:
+  # - filter.ts
+  - log.ts
+  - agent(process.md "回答 *data")
+  - log.ts

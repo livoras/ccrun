@@ -1,17 +1,43 @@
-import { createServer } from 'http';
+import { createServer, ServerResponse } from 'http';
 
 const questions = [
-  "What's your favorite programming language?",
-  "How do you handle errors in async code?",
-  "What's the difference between let and const?",
-  "How does event loop work in Node.js?",
-  "What's your preferred testing framework?",
-  "How do you optimize React performance?",
-  "What's the purpose of TypeScript?",
-  "How do you handle state management?",
-  "What's your favorite design pattern?",
-  "How do you debug production issues?"
+  "黑洞是如何形成的？",
+  "地球的内部结构是怎样的？",
+  "什么是暗物质和暗能量？",
+  "恒星是如何诞生和死亡的？",
+  "板块构造理论是什么？",
+  "宇宙大爆炸理论的主要证据有哪些？",
+  "什么是引力波？",
+  "火山喷发的原理是什么？",
+  "银河系的结构是怎样的？",
+  "地球磁场是如何产生的？",
+  "什么是红移现象？",
+  "地震是如何发生的？",
+  "太阳系是如何形成的？",
+  "什么是量子纠缠？",
+  "地球的大气层是如何形成的？"
 ];
+
+// Store all connected clients
+const clients = new Set<ServerResponse>();
+
+// Global timer to broadcast to all clients
+setInterval(() => {
+  const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
+  const data = {
+    question: randomQuestion,
+    timestamp: new Date().toISOString()
+  };
+  
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  
+  // Broadcast to all connected clients
+  clients.forEach(client => {
+    client.write(message);
+  });
+  
+  console.log(`Broadcasting to ${clients.size} clients: ${randomQuestion}`);
+}, 30000);
 
 const server = createServer((req, res) => {
   if (req.url === '/events') {
@@ -22,22 +48,13 @@ const server = createServer((req, res) => {
       'Access-Control-Allow-Origin': '*'
     });
 
-    const interval = setInterval(() => {
-      const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
-      const data = {
-        question: randomQuestion,
-      };
-      
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    }, 10000);
-
-    // Send initial message
-    res.write(`data: ${JSON.stringify({ 
-      question: questions[0],
-    })}\n\n`);
+    // Add client to the set
+    clients.add(res);
+    console.log(`Client connected. Total clients: ${clients.size}`);
 
     req.on('close', () => {
-      clearInterval(interval);
+      clients.delete(res);
+      console.log(`Client disconnected. Total clients: ${clients.size}`);
       res.end();
     });
   } else {
