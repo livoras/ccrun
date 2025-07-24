@@ -1,9 +1,16 @@
 /**
- * 替换 @{} 标记为 Bash 命令
- * 支持的格式：
+ * 替换 @{} 和 @[] 标记为 Bash 命令
+ * 
+ * @{} 格式（调用 ccrun）：
  * - @{"command"} 或 @{'command'} -> Bash(ccrun 'command' [--taskId xxx])
  * - @{filename} -> Bash(ccrun -f filename [--taskId xxx])
  * - @{filename "user input"} 或 @{filename 'user input'} -> Bash(ccrun -f filename 'user input' [--taskId xxx])
+ * 
+ * @[] 格式（直接执行）：
+ * - @[script.ts --arg "value"] -> Bash(npx tsx /absolute/path/script.ts --arg "value")
+ * - @[script.js --arg "value"] -> Bash(node /absolute/path/script.js --arg "value")
+ * - @[script.py --arg "value"] -> Bash(python3 /absolute/path/script.py --arg "value")
+ * - @[echo "hello"] -> Bash(echo "hello")
  */
 
 import * as path from 'path';
@@ -22,8 +29,10 @@ export interface ReplaceOptions {
 export function replaceAtMarks(prompt: string, options: ReplaceOptions = {}): string {
   const { taskId, currentFilePath } = options;
   
-  // 使用一个更强大的正则表达式来处理所有情况
-  // 这个正则使用前瞻和后顾来正确匹配引号
+  // First replace @[] syntax
+  prompt = replaceSquareBrackets(prompt, currentFilePath);
+  
+  // Then replace @{} syntax
   const regex = /@\{(?:(?:(["'])([^]*?)\1)|([^}\s"']+)(?:\s+(["'])([^]*?)\4)?)\}/g;
   
   return prompt.replace(regex, (match, _quote1, directCmd, filename, _quote2, userInput) => {
@@ -92,4 +101,45 @@ function resolveFilePath(filename: string, currentFilePath?: string): string {
   
   // 否则相对于当前工作目录解析
   return path.resolve(process.cwd(), filename);
+}
+
+/**
+ * 替换 @[] 标记为 Bash 命令
+ * @param prompt 原始字符串
+ * @param currentFilePath 当前文件路径
+ * @returns 替换后的字符串
+ */
+function replaceSquareBrackets(prompt: string, currentFilePath?: string): string {
+  const regex = /@\[([^\]]+)\]/g;
+  
+  return prompt.replace(regex, (match, content) => {
+    // Parse the command content
+    const trimmed = content.trim();
+    
+    // Extract the first part (could be a file or command)
+    const firstSpaceIndex = trimmed.indexOf(' ');
+    const firstPart = firstSpaceIndex === -1 ? trimmed : trimmed.substring(0, firstSpaceIndex);
+    const restPart = firstSpaceIndex === -1 ? '' : trimmed.substring(firstSpaceIndex + 1);
+    
+    // Check if first part is a script file
+    if (firstPart.match(/\.\w+$/)) {
+      const ext = path.extname(firstPart).toLowerCase();
+      const absolutePath = resolveFilePath(firstPart, currentFilePath);
+      
+      switch (ext) {
+        case '.ts':
+          return `Bash(npx tsx ${absolutePath}${restPart ? ' ' + restPart : ''})`;
+        case '.js':
+          return `Bash(node ${absolutePath}${restPart ? ' ' + restPart : ''})`;
+        case '.py':
+          return `Bash(python3 ${absolutePath}${restPart ? ' ' + restPart : ''})`;
+        default:
+          // Unknown extension, treat as shell script
+          return `Bash(${absolutePath}${restPart ? ' ' + restPart : ''})`;
+      }
+    } else {
+      // Not a file, treat as direct command
+      return `Bash(${trimmed})`;
+    }
+  });
 }

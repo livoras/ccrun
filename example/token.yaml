@@ -1,0 +1,4 @@
+sse:  http://localhost:3003/api/sse/new-tokens
+
+run:
+  - log.ts
