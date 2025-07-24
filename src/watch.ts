@@ -39,7 +39,9 @@ class Pipeline {
           const funcMatch = item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/);
           // Extract content from function(...)
           const content = funcMatch![2].trim();
-          const commandStr = `@{${content}}`;
+          // Parse comma-separated arguments
+          const args = this.parseCommandArgs(content);
+          const commandStr = this.buildCommandString(args);
           this.processors.push({ type: 'command', handler: commandStr });
         } else if (item.startsWith('@{') && item.endsWith('}')) {
           // Command processor (quoted @{} syntax)
@@ -274,6 +276,70 @@ class Pipeline {
       console.error(`[Pipeline] Failed to parse task arguments: ${argsStr}`, error);
       return [];
     }
+  }
+  
+  private parseCommandArgs(argsStr: string): string[] {
+    // Simple parsing for command arguments - split by comma but respect quotes
+    const args: string[] = [];
+    let current = '';
+    let inQuote = false;
+    let quoteChar = '';
+    
+    for (let i = 0; i < argsStr.length; i++) {
+      const char = argsStr[i];
+      
+      if (!inQuote && (char === '"' || char === "'")) {
+        inQuote = true;
+        quoteChar = char;
+        current += char;
+      } else if (inQuote && char === quoteChar && argsStr[i-1] !== '\\') {
+        inQuote = false;
+        current += char;
+      } else if (!inQuote && char === ',') {
+        args.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    
+    if (current.trim()) {
+      args.push(current.trim());
+    }
+    
+    return args;
+  }
+  
+  private buildCommandString(args: string[]): string {
+    if (args.length === 0) {
+      return '@{}';
+    }
+    
+    // Remove quotes from arguments if present
+    const cleanArgs = args.map(arg => {
+      if ((arg.startsWith('"') && arg.endsWith('"')) || 
+          (arg.startsWith("'") && arg.endsWith("'"))) {
+        return arg.slice(1, -1);
+      }
+      return arg;
+    });
+    
+    if (cleanArgs.length === 1) {
+      // Check if it's a filename (has extension) or a direct command
+      if (cleanArgs[0].match(/\.\w+$/)) {
+        // Single filename
+        return `@{${cleanArgs[0]}}`;
+      } else {
+        // Direct command
+        return `@{"${cleanArgs[0]}"}`;
+      }
+    } else if (cleanArgs.length === 2) {
+      // File + user input
+      return `@{${cleanArgs[0]} "${cleanArgs[1]}"}`;
+    }
+    
+    // Shouldn't happen, but fallback
+    return `@{${args.join(' ')}}`;
   }
   
 
