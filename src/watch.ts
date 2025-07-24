@@ -4,6 +4,7 @@ import { get } from 'http';
 import { resolve, dirname } from 'path';
 import { pathToFileURL } from 'url';
 import { runCC } from './cc-core';
+import { ActionClient } from './action-client';
 
 interface Config {
   sse: string;
@@ -11,25 +12,33 @@ interface Config {
 }
 
 interface ProcessorFunction {
-  (data: any, next: (data: any) => void): void;
+  (data: any, next: (data: any) => void, taskId?: string): void;
 }
 
 class Pipeline {
-  private processors: Array<{ type: 'function' | 'command', handler: ProcessorFunction | string }> = [];
+  private processors: Array<{ type: 'function' | 'command' | 'task', handler: ProcessorFunction | string }> = [];
   private configPath: string;
+  private actionClient: ActionClient;
+  private currentTaskId?: string;
 
   constructor(private config: Config, configPath: string) {
     this.configPath = configPath;
+    this.actionClient = new ActionClient();
   }
 
   async loadProcessors() {
     for (const item of this.config.run) {
       if (typeof item === 'string') {
+        // Check for task() function with or without arguments
+        const taskMatch = item.match(/^task\s*\((.*)\)$/);
+        if (taskMatch) {
+          this.processors.push({ type: 'task', handler: item });
+        }
         // Check for agent(), ccrun(), or cc() function syntax
-        const funcMatch = item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/);
-        if (funcMatch) {
+        else if (item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/)) {
+          const funcMatch = item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/);
           // Extract content from function(...)
-          const content = funcMatch[2].trim();
+          const content = funcMatch![2].trim();
           const commandStr = `@{${content}}`;
           this.processors.push({ type: 'command', handler: commandStr });
         } else if (item.startsWith('@{') && item.endsWith('}')) {
@@ -85,7 +94,43 @@ class Pipeline {
     for (let i = 0; i < this.processors.length; i++) {
       const processor = this.processors[i];
       
-      if (processor.type === 'function') {
+      if (processor.type === 'task') {
+        // Task processor - create a new task
+        console.log('[Pipeline] Creating new task...');
+        try {
+          const projectPath = dirname(this.configPath);
+          
+          // Parse task() arguments
+          const taskCall = processor.handler as string;
+          const match = taskCall.match(/^task\s*\((.*)\)$/);
+          const argsStr = match ? match[1].trim() : '';
+          
+          let taskName = `Task ${new Date().toISOString()}`;
+          let description = 'Auto-created task from watch pipeline';
+          let tags: string[] = [];
+          
+          if (argsStr) {
+            // Parse arguments using a simple parser
+            const args = this.parseTaskArgs(argsStr, currentData);
+            if (args.length > 0 && args[0] !== undefined) taskName = String(args[0]);
+            if (args.length > 1 && args[1] !== undefined) description = String(args[1]);
+            if (args.length > 2 && Array.isArray(args[2])) tags = args[2].map(String);
+          }
+          
+          const result = await this.actionClient.createTask(
+            taskName,
+            description,
+            tags,
+            undefined,
+            projectPath
+          );
+          this.currentTaskId = result.id.toString();
+          console.log(`[Pipeline] Task created with ID: ${this.currentTaskId}, name: ${taskName}`);
+        } catch (error) {
+          console.error('[Pipeline] Failed to create task:', error);
+          throw error;
+        }
+      } else if (processor.type === 'function') {
         // Function processor
         const handler = processor.handler as ProcessorFunction;
         let nextCalled = false;
@@ -96,7 +141,7 @@ class Pipeline {
             nextCalled = true;
             nextData = newData;
             resolve();
-          });
+          }, this.currentTaskId);
           
           // If handler is sync and doesn't call next, resolve immediately
           setTimeout(() => {
@@ -186,12 +231,14 @@ class Pipeline {
           response = await runCC({
             filePath: cmdFilePath,
             userInput: processedArgs.join(' '),
-            packageRoot
+            packageRoot,
+            taskId: this.currentTaskId
           });
         } else {
           response = await runCC({
             filePath: cmdFilePath,
-            packageRoot
+            packageRoot,
+            taskId: this.currentTaskId
           });
         }
       } else {
@@ -199,7 +246,8 @@ class Pipeline {
         const prompt = processedArgs.join(' ');
         response = await runCC({
           prompt,
-          packageRoot
+          packageRoot,
+          taskId: this.currentTaskId
         });
       }
       
@@ -215,6 +263,19 @@ class Pipeline {
       throw error;
     }
   }
+  
+  private parseTaskArgs(argsStr: string, data: any): any[] {
+    try {
+      // Simply use new Function to parse the entire arguments as JavaScript
+      // This allows direct use of data.xxx without needing *data
+      const func = new Function('data', `return [${argsStr}]`);
+      return func(data);
+    } catch (error) {
+      console.error(`[Pipeline] Failed to parse task arguments: ${argsStr}`, error);
+      return [];
+    }
+  }
+  
 
   listenToSSE() {
     console.log(`Connecting to SSE: ${this.config.sse}`);

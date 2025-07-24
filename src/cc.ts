@@ -19,6 +19,10 @@ async function main() {
       i++; // 跳过下一个参数
     } else if (args[i] === '-f' && i + 1 < args.length) {
       filePath = args[i + 1];
+      // Convert to absolute path if relative
+      if (!path.isAbsolute(filePath)) {
+        filePath = path.resolve(process.cwd(), filePath);
+      }
       i++; // 跳过下一个参数
     } else if (!prompt && !filePath) {
       prompt = args[i];

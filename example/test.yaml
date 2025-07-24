@@ -1,7 +1,8 @@
 sse: http://localhost:8081/events
 
 run:
-  # - filter.ts
+  - filter.ts
+  - task("filter q", data.question, ["HAHA"])
   - log.ts
   - agent(process.md "回答 *data")
   - log.ts

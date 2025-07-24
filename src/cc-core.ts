@@ -47,7 +47,7 @@ export async function runCC(options: CCOptions): Promise<string | void> {
   }
   
   // 解析并替换 @{} 标记
-  prompt = replaceAtMarks(prompt, { taskId });
+  prompt = replaceAtMarks(prompt, { taskId, currentFilePath: filePath });
   
   console.log('--------->', prompt)
   
