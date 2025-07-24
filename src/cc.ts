@@ -55,9 +55,9 @@ async function main() {
   }
   
   if (!prompt) {
-    console.error('Usage: cc "<prompt>" [--taskId <taskId>]');
-    console.error('   or: cc -f <filename> [--taskId <taskId>]');
-    console.error('   or: cc -f <filename> "<user input>" [--taskId <taskId>]');
+    console.error('Usage: ccrun "<prompt>" [--taskId <taskId>]');
+    console.error('   or: ccrun -f <filename> [--taskId <taskId>]');
+    console.error('   or: ccrun -f <filename> "<user input>" [--taskId <taskId>]');
     process.exit(1);
   }
   

@@ -1,9 +1,9 @@
 /**
  * 替换 @{} 标记为 Bash 命令
  * 支持的格式：
- * - @{"command"} 或 @{'command'} -> Bash(cc 'command' [--taskId xxx])
- * - @{filename} -> Bash(cc -f filename [--taskId xxx])
- * - @{filename "user input"} 或 @{filename 'user input'} -> Bash(cc -f filename 'user input' [--taskId xxx])
+ * - @{"command"} 或 @{'command'} -> Bash(ccrun 'command' [--taskId xxx])
+ * - @{filename} -> Bash(ccrun -f filename [--taskId xxx])
+ * - @{filename "user input"} 或 @{filename 'user input'} -> Bash(ccrun -f filename 'user input' [--taskId xxx])
  */
 
 export interface ReplaceOptions {
@@ -28,19 +28,19 @@ export function replaceAtMarks(prompt: string, options: ReplaceOptions = {}): st
       // @{"xxx"} 或 @{'xxx'} 格式 - 直接命令
       const command = unescapeQuotes(directCmd);
       return taskId 
-        ? `Bash(cc '${escapeForShell(command)}' --taskId ${taskId})`
-        : `Bash(cc '${escapeForShell(command)}')`;
+        ? `Bash(ccrun '${escapeForShell(command)}' --taskId ${taskId})`
+        : `Bash(ccrun '${escapeForShell(command)}')`;
     } else if (filename && userInput !== undefined) {
       // @{filename "xxx"} 或 @{filename 'xxx'} 格式 - 文件名 + 用户输入
       const input = unescapeQuotes(userInput);
       return taskId
-        ? `Bash(cc -f ${filename} '${escapeForShell(input)}' --taskId ${taskId})`
-        : `Bash(cc -f ${filename} '${escapeForShell(input)}')`;
+        ? `Bash(ccrun -f ${filename} '${escapeForShell(input)}' --taskId ${taskId})`
+        : `Bash(ccrun -f ${filename} '${escapeForShell(input)}')`;
     } else if (filename) {
       // @{filename} 格式 - 仅文件名
       return taskId
-        ? `Bash(cc -f ${filename} --taskId ${taskId})`
-        : `Bash(cc -f ${filename})`;
+        ? `Bash(ccrun -f ${filename} --taskId ${taskId})`
+        : `Bash(ccrun -f ${filename})`;
     }
     
     // 不应该到达这里，但保险起见返回原匹配
