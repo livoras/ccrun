@@ -5,3 +5,4 @@ description: Test cron trigger every 10 seconds
 
 run:
   - log.ts
+  - task(data.name, "", ["cron"])
