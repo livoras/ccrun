@@ -380,6 +380,7 @@ async function main() {
     console.error('\nExample config formats:');
     console.error('  SSE mode:     type: sse, sse: <url>');
     console.error('  Crontab mode: type: crontab, crontab: "*/5 * * * *"');
+    console.error('  Webhook mode: type: webhook, port: 3000, path: /webhook');
     process.exit(1);
   }
   
@@ -424,6 +425,11 @@ async function main() {
       case 'crontab':
         if (!config.crontab) {
           throw new Error('Crontab config requires "crontab" field with cron expression');
+        }
+        break;
+      case 'webhook':
+        if (!config.port) {
+          throw new Error('Webhook config requires "port" field');
         }
         break;
       default:

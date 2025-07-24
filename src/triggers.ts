@@ -1,6 +1,6 @@
-import { get } from 'http';
+import { get, createServer, IncomingMessage, ServerResponse } from 'http';
 import * as cron from 'node-cron';
-import { Config, SSEConfig, CrontabConfig } from './types';
+import { Config, SSEConfig, CrontabConfig, WebhookConfig } from './types';
 
 // Trigger callback type
 export type TriggerCallback = (data: any) => Promise<void>;
@@ -139,6 +139,112 @@ export class CrontabTrigger implements Trigger {
 }
 
 
+// Webhook Trigger implementation
+export class WebhookTrigger implements Trigger {
+  private config: WebhookConfig;
+  private server?: any;
+  
+  constructor(config: WebhookConfig) {
+    this.config = config;
+  }
+  
+  get name() {
+    return this.config.name;
+  }
+  
+  get description() {
+    return this.config.description;
+  }
+  
+  start(callback: TriggerCallback): void {
+    const path = this.config.path || '/webhook';
+    
+    console.log(`[Webhook] Starting webhook trigger: ${this.config.name}`);
+    console.log(`[Webhook] Listening on port ${this.config.port} at path ${path}`);
+    if (this.config.auth) {
+      console.log(`[Webhook] Authentication enabled (Bearer token)`);
+    }
+    
+    this.server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+      // Only handle POST requests to the configured path
+      if (req.method !== 'POST' || req.url !== path) {
+        res.statusCode = 404;
+        res.end('Not Found');
+        return;
+      }
+      
+      // Check authentication if configured
+      if (this.config.auth) {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || authHeader !== `Bearer ${this.config.auth}`) {
+          res.statusCode = 401;
+          res.end('Unauthorized');
+          return;
+        }
+      }
+      
+      // Collect request body
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      req.on('end', async () => {
+        try {
+          // Parse JSON body
+          let data;
+          try {
+            data = JSON.parse(body);
+          } catch (e) {
+            // If not JSON, use raw body
+            data = { body };
+          }
+          
+          // Add webhook metadata
+          const webhookData = {
+            timestamp: new Date().toISOString(),
+            trigger: 'webhook',
+            name: this.config.name,
+            method: req.method,
+            path: req.url,
+            headers: req.headers,
+            ...data
+          };
+          
+          console.log(`[Webhook] Received POST to ${path}`);
+          
+          // Trigger the callback
+          await callback(webhookData);
+          
+          // Send success response
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: true, message: 'Webhook processed' }));
+        } catch (err) {
+          console.error('[Webhook] Error processing request:', err);
+          res.statusCode = 500;
+          res.end('Internal Server Error');
+        }
+      });
+    });
+    
+    this.server.listen(this.config.port, () => {
+      console.log(`[Webhook] Server started on port ${this.config.port}`);
+    });
+    
+    this.server.on('error', (err: any) => {
+      console.error('[Webhook] Server error:', err);
+    });
+  }
+  
+  stop(): void {
+    console.log(`[Webhook] Stopping webhook trigger: ${this.config.name}`);
+    if (this.server) {
+      this.server.close();
+    }
+  }
+}
+
 // Factory function to create triggers
 export function createTrigger(config: Config): Trigger {
   switch (config.type) {
@@ -146,6 +252,8 @@ export function createTrigger(config: Config): Trigger {
       return new SSETrigger(config);
     case 'crontab':
       return new CrontabTrigger(config);
+    case 'webhook':
+      return new WebhookTrigger(config);
     default:
       throw new Error(`Unknown trigger type: ${(config as any).type}`);
   }
