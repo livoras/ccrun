@@ -37,8 +37,15 @@ class Pipeline {
         // Check for agent(), ccrun(), or cc() function syntax
         else if (item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/)) {
           const funcMatch = item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/);
+          const funcName = funcMatch![1];
           // Extract content from function(...)
           const content = funcMatch![2].trim();
+          
+          // Validate that arguments are provided
+          if (!content) {
+            throw new Error(`${funcName}() requires at least one argument`);
+          }
+          
           // Parse comma-separated arguments
           const args = this.parseCommandArgs(content);
           const commandStr = this.buildCommandString(args);
@@ -312,7 +319,7 @@ class Pipeline {
   
   private buildCommandString(args: string[]): string {
     if (args.length === 0) {
-      return '@{}';
+      throw new Error('Command requires at least one argument');
     }
     
     // Remove quotes from arguments if present
