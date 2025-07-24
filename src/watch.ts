@@ -172,7 +172,8 @@ class Pipeline {
     
     console.log(`[Command] Mode: ${isFile ? 'file' : 'direct'}, File: ${cmdFile}, Args:`, processedArgs);
     
-    const packageRoot = resolve(dirname(this.configPath));
+    // Always use the actual project root, not relative to config file
+    const packageRoot = resolve(__dirname, '..');
     
     try {
       // Call runCC directly

@@ -20,6 +20,6 @@
     "noFallthroughCasesInSwitch": true,
     "moduleResolution": "node"
   },
-  "include": ["src/**/*", "test-sse.ts"],
+  "include": ["src/**/*", "example/test-sse.ts"],
   "exclude": ["node_modules", "dist"]
 }

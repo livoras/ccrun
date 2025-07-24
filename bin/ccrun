@@ -1,2 +1,12 @@
 #!/usr/bin/env npx tsx
-import('../src/cc.ts');
+
+// Check if the first argument is 'watch'
+const args = process.argv.slice(2);
+if (args[0] === 'watch') {
+  // Remove 'watch' from args and pass the rest to watch.ts
+  process.argv = ['node', 'watch.ts', ...args.slice(1)];
+  import('../src/watch.ts');
+} else {
+  // Default behavior - run cc.ts
+  import('../src/cc.ts');
+}
