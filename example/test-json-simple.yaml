@@ -1,0 +1,8 @@
+name: test json simple
+type: crontab
+crontab: "*/60 * * * * *"  # Once per minute
+
+run:
+  - json-test-cases.ts
+  - json
+  - log.ts
