@@ -30,7 +30,14 @@ export interface WebhookConfig extends BaseConfig {
 // Union type for all configs
 export type Config = SSEConfig | CrontabConfig | WebhookConfig;
 
+// Processor context interface
+export interface ProcessorContext {
+  history: any[];    // Array of all data states through the pipeline
+  taskId?: string;   // Current task ID if available
+  task?: any;        // Full task object if available
+}
+
 // Processor function type
 export interface ProcessorFunction {
-  (data: any, next: (data: any) => void, taskId?: string): void;
+  (data: any, next: (data: any) => void, context: ProcessorContext): void;
 }

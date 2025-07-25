@@ -33,6 +33,10 @@ export class ActionClient {
     return await this.httpRequest('POST', '/api/tasks', { name, description, tags, logo, project_path });
   }
   
+  async getTask(taskId: number): Promise<any> {
+    return await this.httpRequest('GET', `/api/tasks/${taskId}`);
+  }
+  
   async updateTask(taskId: number, updates: { name?: string; description?: string; logo?: string }): Promise<any> {
     return await this.httpRequest('PUT', `/api/tasks/${taskId}`, updates);
   }

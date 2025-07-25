@@ -4,7 +4,7 @@ import { resolve, dirname } from 'path';
 import { pathToFileURL } from 'url';
 import { runCC } from './cc-core';
 import { ActionClient } from './action-client';
-import { Config, ProcessorFunction } from './types';
+import { Config, ProcessorFunction, ProcessorContext } from './types';
 import { createTrigger, Trigger } from './triggers';
 
 class Pipeline {
@@ -51,20 +51,15 @@ class Pipeline {
         } else {
           // JS/TS file processor
           const filePath = this.resolveFilePath(item);
-          try {
-            const fileUrl = pathToFileURL(filePath).href;
-            const module = await import(fileUrl);
-            const handler = module.default;
-            
-            if (typeof handler !== 'function') {
-              throw new Error(`Default export from ${filePath} is not a function`);
-            }
-            
-            this.processors.push({ type: 'function', handler });
-          } catch (error) {
-            console.error(`Failed to load processor ${item}:`, error);
-            throw error;
+          const fileUrl = pathToFileURL(filePath).href;
+          const module = await import(fileUrl);
+          const handler = module.default;
+          
+          if (typeof handler !== 'function') {
+            throw new Error(`Default export from ${filePath} is not a function`);
           }
+          
+          this.processors.push({ type: 'function', handler });
         }
       }
     }
@@ -79,11 +74,12 @@ class Pipeline {
     
     for (const ext of possibleExts) {
       const fullPath = resolve(configDir, basePath + ext);
+      // Check if file exists by attempting to access it
       try {
-        // Check if file exists by attempting to access it
         require.resolve(fullPath);
         return fullPath;
       } catch {
+        // File doesn't exist with this extension, try next
         continue;
       }
     }
@@ -94,6 +90,17 @@ class Pipeline {
 
   async execute(data: any) {
     let currentData = data;
+    const history: any[] = [data]; // Start with original data
+    
+    // Get task info if we have a task ID
+    let currentTask: any = null;
+    if (this.currentTaskId) {
+      // Get task info - if it fails, just log and continue without task info
+      currentTask = await this.actionClient.getTask(parseInt(this.currentTaskId)).catch(error => {
+        console.error('[Pipeline] Failed to get task info:', error);
+        return null;
+      });
+    }
     
     for (let i = 0; i < this.processors.length; i++) {
       const processor = this.processors[i];
@@ -101,51 +108,58 @@ class Pipeline {
       if (processor.type === 'task') {
         // Task processor - create a new task
         console.log('[Pipeline] Creating new task...');
-        try {
-          const projectPath = dirname(this.configPath);
-          
-          // Parse task() arguments
-          const taskCall = processor.handler as string;
-          const match = taskCall.match(/^task\s*\((.*)\)$/);
-          const argsStr = match ? match[1].trim() : '';
-          
-          let taskName = `Task ${new Date().toISOString()}`;
-          let description = 'Auto-created task from watch pipeline';
-          let tags: string[] = [];
-          
-          if (argsStr) {
-            // Parse arguments using a simple parser
-            const args = this.parseTaskArgs(argsStr, currentData);
-            if (args.length > 0 && args[0] !== undefined) taskName = String(args[0]);
-            if (args.length > 1 && args[1] !== undefined) description = String(args[1]);
-            if (args.length > 2 && Array.isArray(args[2])) tags = args[2].map(String);
-          }
-          
-          const result = await this.actionClient.createTask(
-            taskName,
-            description,
-            tags,
-            undefined,
-            projectPath
-          );
-          this.currentTaskId = result.id.toString();
-          console.log(`[Pipeline] Task created with ID: ${this.currentTaskId}, name: ${taskName}`);
-        } catch (error) {
-          console.error('[Pipeline] Failed to create task:', error);
-          throw error;
+        const projectPath = dirname(this.configPath);
+        
+        // Parse task() arguments
+        const taskCall = processor.handler as string;
+        const match = taskCall.match(/^task\s*\((.*)\)$/);
+        const argsStr = match ? match[1].trim() : '';
+        
+        let taskName = `Task ${new Date().toISOString()}`;
+        let description = 'Auto-created task from watch pipeline';
+        let tags: string[] = [];
+        let logo: string | undefined;
+        
+        if (argsStr) {
+          // Parse arguments using a simple parser
+          const args = this.parseTaskArgs(argsStr, currentData);
+          if (args.length > 0 && args[0] !== undefined) taskName = String(args[0]);
+          if (args.length > 1 && args[1] !== undefined) description = String(args[1]);
+          if (args.length > 2 && Array.isArray(args[2])) tags = args[2].map(String);
+          if (args.length > 3 && args[3] !== undefined) logo = String(args[3]);
         }
+        
+        const result = await this.actionClient.createTask(
+          taskName,
+          description,
+          tags,
+          logo,
+          projectPath
+        );
+        this.currentTaskId = result.id.toString();
+        console.log(`[Pipeline] Task created with ID: ${this.currentTaskId}, name: ${taskName}`);
+        
+        // Update currentTask with the newly created task
+        currentTask = result;
       } else if (processor.type === 'function') {
         // Function processor
         const handler = processor.handler as ProcessorFunction;
         let nextCalled = false;
         let nextData: any;
         
+        // Create context for this processor
+        const context: ProcessorContext = {
+          history: [...history], // Copy of history array
+          taskId: this.currentTaskId,
+          task: currentTask
+        };
+        
         await new Promise<void>((resolve) => {
           handler(currentData, (newData) => {
             nextCalled = true;
             nextData = newData;
             resolve();
-          }, this.currentTaskId);
+          }, context);
           
           // If handler is sync and doesn't call next, resolve immediately
           setTimeout(() => {
@@ -161,17 +175,14 @@ class Pipeline {
         }
         
         currentData = nextData;
+        history.push(currentData); // Add to history after processing
       } else {
         // Command processor
         const command = processor.handler as string;
         console.log(`[Pipeline] Executing command processor: ${command}`);
-        try {
-          currentData = await this.executeCommand(command, currentData);
-          console.log(`[Pipeline] Command completed successfully`);
-        } catch (error) {
-          console.error(`[Pipeline] Command failed:`, error);
-          throw error;
-        }
+        currentData = await this.executeCommand(command, currentData);
+        console.log(`[Pipeline] Command completed successfully`);
+        history.push(currentData); // Add to history after processing
       }
     }
   }
@@ -225,60 +236,50 @@ class Pipeline {
     // Always use the actual project root, not relative to config file
     const packageRoot = resolve(__dirname, '..');
     
-    try {
-      // Call runCC directly
-      let response: string | void;
-      
-      if (isFile) {
-        // File mode
-        const cmdFilePath = resolve(dirname(this.configPath), cmdFile);
-        if (processedArgs.length > 0) {
-          response = await runCC({
-            filePath: cmdFilePath,
-            userInput: processedArgs.join(' '),
-            packageRoot,
-            taskId: this.currentTaskId
-          });
-        } else {
-          response = await runCC({
-            filePath: cmdFilePath,
-            packageRoot,
-            taskId: this.currentTaskId
-          });
-        }
-      } else {
-        // Direct prompt mode
-        const prompt = processedArgs.join(' ');
+    // Call runCC directly
+    let response: string | void;
+    
+    if (isFile) {
+      // File mode
+      const cmdFilePath = resolve(dirname(this.configPath), cmdFile);
+      if (processedArgs.length > 0) {
         response = await runCC({
-          prompt,
+          filePath: cmdFilePath,
+          userInput: processedArgs.join(' '),
+          packageRoot,
+          taskId: this.currentTaskId
+        });
+      } else {
+        response = await runCC({
+          filePath: cmdFilePath,
           packageRoot,
           taskId: this.currentTaskId
         });
       }
-      
-      console.log(`[Command] cc execution completed`);
-      
-      // Return the agent's response if available, otherwise pass through data
-      if (response) {
-        return { output: response, input: data };
-      }
-      return data;
-    } catch (error) {
-      console.error('[Command] Error executing cc:', error);
-      throw error;
+    } else {
+      // Direct prompt mode
+      const prompt = processedArgs.join(' ');
+      response = await runCC({
+        prompt,
+        packageRoot,
+        taskId: this.currentTaskId
+      });
     }
+    
+    console.log(`[Command] cc execution completed`);
+    
+    // Return the agent's response if available, otherwise pass through data
+    if (response) {
+      return { output: response, input: data };
+    }
+    return data;
   }
   
   private parseTaskArgs(argsStr: string, data: any): any[] {
-    try {
-      // Simply use new Function to parse the entire arguments as JavaScript
-      // This allows direct use of data.xxx without needing *data
-      const func = new Function('data', `return [${argsStr}]`);
-      return func(data);
-    } catch (error) {
-      console.error(`[Pipeline] Failed to parse task arguments: ${argsStr}`, error);
-      return [];
-    }
+    // Simply use new Function to parse the entire arguments as JavaScript
+    // This allows direct use of data.xxx without needing *data
+    const func = new Function('data', `return [${argsStr}]`);
+    return func(data);
   }
   
   private parseCommandArgs(argsStr: string): string[] {
@@ -357,11 +358,9 @@ class Pipeline {
     
     // Start the trigger with our execute callback
     this.trigger.start(async (data) => {
-      try {
-        await this.execute(data);
-      } catch (err) {
+      await this.execute(data).catch(err => {
         console.error('[Pipeline] Execution error:', err);
-      }
+      });
     });
   }
   
@@ -385,76 +384,74 @@ async function main() {
     process.exit(1);
   }
   
-  try {
-    const configPath = resolve(process.cwd(), configFile);
-    const configContent = await readFile(configPath, 'utf-8');
-    let config = parse(configContent) as any;
-    
-    // Add config file path to the config
-    config.configPath = configPath;
-    
-    // Backward compatibility: if no type field, assume SSE mode
-    if (!config.type && config.sse) {
-      console.log('[Pipeline] No type specified, assuming SSE mode for backward compatibility');
-      config.type = 'sse';
-      // Set default name if not provided
-      if (!config.name) {
-        config.name = 'Legacy SSE Pipeline';
-      }
-    }
-    
-    // Validate required fields
-    if (!config.run || !Array.isArray(config.run)) {
-      throw new Error('Invalid config: "run" field must be an array');
-    }
-    
-    if (!config.type) {
-      throw new Error('Invalid config: "type" field is required (sse, crontab, or watch)');
-    }
-    
+  const configPath = resolve(process.cwd(), configFile);
+  const configContent = await readFile(configPath, 'utf-8');
+  let config = parse(configContent) as any;
+  
+  // Add config file path to the config
+  config.configPath = configPath;
+  
+  // Backward compatibility: if no type field, assume SSE mode
+  if (!config.type && config.sse) {
+    console.log('[Pipeline] No type specified, assuming SSE mode for backward compatibility');
+    config.type = 'sse';
+    // Set default name if not provided
     if (!config.name) {
-      throw new Error('Invalid config: "name" field is required');
+      config.name = 'Legacy SSE Pipeline';
     }
-    
-    // Type-specific validation
-    switch (config.type) {
-      case 'sse':
-        if (!config.sse) {
-          throw new Error('SSE config requires "sse" field with URL');
-        }
-        break;
-      case 'crontab':
-        if (!config.crontab) {
-          throw new Error('Crontab config requires "crontab" field with cron expression');
-        }
-        break;
-      case 'webhook':
-        if (!config.port) {
-          throw new Error('Webhook config requires "port" field');
-        }
-        break;
-      default:
-        throw new Error(`Unknown trigger type: ${config.type}`);
-    }
-    
-    const pipeline = new Pipeline(config as Config, configPath);
-    await pipeline.loadProcessors();
-    
-    console.log(`[Pipeline] Loaded ${config.run.length} processors`);
-    
-    // Handle graceful shutdown
-    process.on('SIGINT', () => {
-      console.log('\n[Pipeline] Shutting down...');
-      pipeline.stop();
-      process.exit(0);
-    });
-    
-    // Start the pipeline with the configured trigger
-    pipeline.start();
-  } catch (error) {
-    console.error('[Pipeline] Failed to start:', error);
-    process.exit(1);
   }
+  
+  // Validate required fields
+  if (!config.run || !Array.isArray(config.run)) {
+    throw new Error('Invalid config: "run" field must be an array');
+  }
+  
+  if (!config.type) {
+    throw new Error('Invalid config: "type" field is required (sse, crontab, or watch)');
+  }
+  
+  if (!config.name) {
+    throw new Error('Invalid config: "name" field is required');
+  }
+  
+  // Type-specific validation
+  switch (config.type) {
+    case 'sse':
+      if (!config.sse) {
+        throw new Error('SSE config requires "sse" field with URL');
+      }
+      break;
+    case 'crontab':
+      if (!config.crontab) {
+        throw new Error('Crontab config requires "crontab" field with cron expression');
+      }
+      break;
+    case 'webhook':
+      if (!config.port) {
+        throw new Error('Webhook config requires "port" field');
+      }
+      break;
+    default:
+      throw new Error(`Unknown trigger type: ${config.type}`);
+  }
+  
+  const pipeline = new Pipeline(config as Config, configPath);
+  await pipeline.loadProcessors();
+  
+  console.log(`[Pipeline] Loaded ${config.run.length} processors`);
+  
+  // Handle graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('\n[Pipeline] Shutting down...');
+    pipeline.stop();
+    process.exit(0);
+  });
+  
+  // Start the pipeline with the configured trigger
+  pipeline.start();
 }
 
-main();
+main().catch(error => {
+  console.error('[Pipeline] Failed to start:', error);
+  process.exit(1);
+});
