@@ -1,9 +1,6 @@
-console.log('Hello from TypeScript!');
-
-export function greet(name: string): string {
-  return `Hello, ${name}!`;
-}
-
-if (require.main === module) {
-  console.log(greet('World'));
-}
+// Main exports
+export { default as ccrun } from './ccrun';
+export { CCRun } from './ccrun';
+export * from './types';
+export { default as ProcessorRegistry } from './processor-registry';
+export { ActionClient } from './action-client';
