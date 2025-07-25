@@ -1,9 +1,0 @@
-name: test json manual
-type: webhook  
-port: 8891
-path: /json-manual
-
-run:
-  - json-test-cases.ts
-  - json
-  - log.ts

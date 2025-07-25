@@ -1,9 +1,0 @@
-name: test json processor
-type: webhook
-port: 8890
-path: /json-test
-
-run:
-  - agent("Generate a JSON object for a user with name, age, email, and hobbies array")
-  - json
-  - log.ts

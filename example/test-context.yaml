@@ -1,9 +1,0 @@
-name: context test
-type: webhook
-port: 8889
-path: /test
-
-run:
-  - task("Context Test Task", "Testing new context parameter", ["test", "context"])
-  - context-test.ts
-  - log.ts

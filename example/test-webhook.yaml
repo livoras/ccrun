@@ -1,9 +1,0 @@
-name: test webhook
-description: Webhook server on port 3001
-type: webhook
-port: 8888
-path: /hook
-auth: secret-token-123
-
-run:
-  - webhook-log.ts

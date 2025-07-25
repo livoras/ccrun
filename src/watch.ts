@@ -2,18 +2,21 @@ import { parse } from 'yaml';
 import { readFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { pathToFileURL } from 'url';
-import { runCC } from './cc-core';
 import { ActionClient } from './action-client';
 import { Config, ProcessorFunction, ProcessorContext } from './types';
 import { createTrigger, Trigger } from './triggers';
+import ProcessorRegistry, { ProcessorRegistryContext } from './processor-registry';
+import { registerBuiltinProcessors } from './processors/index';
 
 class Pipeline {
-  private processors: Array<{ type: 'function' | 'command' | 'task', handler: ProcessorFunction | string }> = [];
+  private processors: Array<{ type: 'function' | 'task' | 'builtin', handler: ProcessorFunction | string, processorName?: string }> = [];
   private configPath: string;
   private actionClient: ActionClient;
   private currentTaskId?: string;
+  private currentTask: any = null;
   private config: Config;
   private trigger?: Trigger;
+  private history: any[] = [];
 
   constructor(config: Config, configPath: string) {
     this.config = config;
@@ -28,40 +31,39 @@ class Pipeline {
         const taskMatch = item.match(/^task\s*\((.*)\)$/);
         if (taskMatch) {
           this.processors.push({ type: 'task', handler: item });
-        }
-        // Check for agent(), ccrun(), or cc() function syntax
-        else if (item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/)) {
-          const funcMatch = item.match(/^(agent|ccrun|cc)\s*\((.*)\)$/);
-          const funcName = funcMatch![1];
-          // Extract content from function(...)
-          const content = funcMatch![2].trim();
-          
-          // Validate that arguments are provided
-          if (!content) {
-            throw new Error(`${funcName}() requires at least one argument`);
-          }
-          
-          // Parse comma-separated arguments
-          const args = this.parseCommandArgs(content);
-          const commandStr = this.buildCommandString(args);
-          this.processors.push({ type: 'command', handler: commandStr });
-        } else if (item.startsWith('@{') && item.endsWith('}')) {
-          // Command processor (quoted @{} syntax)
-          this.processors.push({ type: 'command', handler: item });
-        } else if (item === 'json') {
-          // Built-in json processor
-          const jsonProcessorPath = resolve(__dirname, 'processors/json.js');
-          try {
-            const fileUrl = pathToFileURL(jsonProcessorPath).href;
-            const module = await import(fileUrl);
-            const handler = module.default;
-            this.processors.push({ type: 'function', handler });
-            console.log('[Pipeline] Loaded built-in json processor');
-          } catch (error) {
-            console.error(`Failed to load built-in json processor:`, error);
-            throw error;
-          }
         } else {
+          // Check if it's a built-in processor or a processor with arguments
+          const funcMatch = item.match(/^(\w+)(?:\s*\((.*)\))?$/);
+          if (funcMatch) {
+            const processorName = funcMatch[1];
+            const args = funcMatch[2];
+            
+            // Check if it's a registered processor
+            if (ProcessorRegistry.has(processorName)) {
+              const definition = ProcessorRegistry.get(processorName)!;
+              
+              if (args !== undefined && definition.parseArgs) {
+                // Processor with arguments (like addTags, removeTags)
+                this.processors.push({ 
+                  type: 'builtin', 
+                  handler: `${processorName}(${args})`,
+                  processorName 
+                });
+              } else if (!args) {
+                // Simple processor (like json, log)
+                this.processors.push({ 
+                  type: 'builtin', 
+                  handler: definition.handler as ProcessorFunction,
+                  processorName 
+                });
+              } else {
+                throw new Error(`Processor ${processorName} does not accept arguments`);
+              }
+              continue;
+            }
+          }
+          
+          // Not a built-in processor, treat as file
           // JS/TS file processor
           const filePath = this.resolveFilePath(item);
           const fileUrl = pathToFileURL(filePath).href;
@@ -103,16 +105,15 @@ class Pipeline {
 
   async execute(data: any) {
     let currentData = data;
-    const history: any[] = [data]; // Start with original data
+    this.history = [data]; // Start with original data
     
     // Get task info if we have a task ID
-    let currentTask: any = null;
     if (this.currentTaskId) {
-      // Get task info - if it fails, just log and continue without task info
-      currentTask = await this.actionClient.getTask(parseInt(this.currentTaskId)).catch(error => {
+      try {
+        this.currentTask = await this.actionClient.getTask(parseInt(this.currentTaskId));
+      } catch (error) {
         console.error('[Pipeline] Failed to get task info:', error);
-        return null;
-      });
+      }
     }
     
     for (let i = 0; i < this.processors.length; i++) {
@@ -153,7 +154,7 @@ class Pipeline {
         console.log(`[Pipeline] Task created with ID: ${this.currentTaskId}, name: ${taskName}`);
         
         // Update currentTask with the newly created task
-        currentTask = result;
+        this.currentTask = result;
       } else if (processor.type === 'function') {
         // Function processor
         const handler = processor.handler as ProcessorFunction;
@@ -162,9 +163,9 @@ class Pipeline {
         
         // Create context for this processor
         const context: ProcessorContext = {
-          history: [...history], // Copy of history array
+          history: [...this.history], // Copy of history array
           taskId: this.currentTaskId,
-          task: currentTask
+          task: this.currentTask
         };
         
         await new Promise<void>((resolve) => {
@@ -188,176 +189,94 @@ class Pipeline {
         }
         
         currentData = nextData;
-        history.push(currentData); // Add to history after processing
-      } else {
-        // Command processor
-        const command = processor.handler as string;
-        console.log(`[Pipeline] Executing command processor: ${command}`);
-        currentData = await this.executeCommand(command, currentData);
-        console.log(`[Pipeline] Command completed successfully`);
-        history.push(currentData); // Add to history after processing
+        this.history.push(currentData); // Add to history after processing
+      } else if (processor.type === 'builtin') {
+        // Built-in processor from registry
+        const definition = ProcessorRegistry.get(processor.processorName!);
+        if (!definition) {
+          throw new Error(`Built-in processor ${processor.processorName} not found in registry`);
+        }
+        
+        if (definition.parseArgs) {
+          // Processor with arguments (like addTags, removeTags)
+          const match = (processor.handler as string).match(/^(\w+)\s*\((.*)\)$/);
+          const argsStr = match ? match[2].trim() : '';
+          
+          // Parse arguments using new Function with data and context
+          const parseContext = {
+            history: [...this.history],
+            taskId: this.currentTaskId,
+            task: this.currentTask
+          };
+          const func = new Function('data', 'context', `return [${argsStr}]`);
+          const parsedArgs = func(currentData, parseContext);
+          
+          // Create registry context
+          const registryContext: ProcessorRegistryContext = {
+            actionClient: this.actionClient,
+            currentTaskId: this.currentTaskId,
+            configPath: this.configPath,
+            updateTask: async (taskId: number) => {
+              this.currentTask = await this.actionClient.getTask(taskId);
+            }
+          };
+          
+          // Call the processor with parsed arguments
+          const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
+          currentData = await handler(parsedArgs, currentData, registryContext);
+          this.history.push(currentData);
+        } else {
+          // Simple processor (like json, log)
+          const handler = processor.handler as ProcessorFunction;
+          let nextCalled = false;
+          let nextData: any;
+          
+          // Create context for this processor
+          const context: ProcessorContext = {
+            history: [...this.history],
+            taskId: this.currentTaskId,
+            task: this.currentTask
+          };
+          
+          await new Promise<void>((resolve) => {
+            handler(currentData, (newData) => {
+              nextCalled = true;
+              nextData = newData;
+              resolve();
+            }, context);
+            
+            // If handler is sync and doesn't call next, resolve immediately
+            setTimeout(() => {
+              if (!nextCalled) {
+                resolve();
+              }
+            }, 0);
+          });
+          
+          if (!nextCalled) {
+            // If next wasn't called, stop the pipeline
+            break;
+          }
+          
+          currentData = nextData;
+          this.history.push(currentData);
+        }
       }
     }
   }
 
-  private async executeCommand(command: string, data: any): Promise<any> {
-    console.log(`[Command] Executing: ${command}`);
-    
-    // Parse @{process.md *data} format
-    const match = command.match(/@\{([^}]+)\}/);
-    if (!match) {
-      console.log('[Command] No match found for command format');
-      return data;
-    }
-    
-    const content = match[1];
-    // Split by spaces but respect quoted strings
-    const parts: string[] = [];
-    const regex = /[^\s"]+|"([^"]*)"/gi;
-    let match2;
-    while ((match2 = regex.exec(content))) {
-      parts.push(match2[1] || match2[0]);
-    }
-    
-    // Determine if first part is a file or direct prompt
-    let isFile = false;
-    let cmdFile = '';
-    let cmdArgs = parts;
-    
-    // Check if the entire content is quoted (direct command mode)
-    // If not quoted, treat first part as file
-    if (parts.length > 0 && !content.startsWith('"') && !content.startsWith("'")) {
-      isFile = true;
-      cmdFile = parts[0];
-      cmdArgs = parts.slice(1);
-    }
-    
-    const processedArgs = cmdArgs.map(arg => {
-      // Only replace *data when it's exactly *data, not part of a string
-      if (arg === '*data') {
-        // If data is already a string, pass it directly
-        // Otherwise, stringify it
-        return typeof data === 'string' ? data : JSON.stringify(data);
-      }
-      // Replace *data within strings
-      const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-      return arg.replace(/\*data/g, dataStr);
-    });
-    
-    console.log(`[Command] Mode: ${isFile ? 'file' : 'direct'}, File: ${cmdFile}, Args:`, processedArgs);
-    
-    // Always use the actual project root, not relative to config file
-    const packageRoot = resolve(__dirname, '..');
-    
-    // Call runCC directly
-    let response: string | void;
-    
-    if (isFile) {
-      // File mode
-      const cmdFilePath = resolve(dirname(this.configPath), cmdFile);
-      if (processedArgs.length > 0) {
-        response = await runCC({
-          filePath: cmdFilePath,
-          userInput: processedArgs.join(' '),
-          packageRoot,
-          taskId: this.currentTaskId
-        });
-      } else {
-        response = await runCC({
-          filePath: cmdFilePath,
-          packageRoot,
-          taskId: this.currentTaskId
-        });
-      }
-    } else {
-      // Direct prompt mode
-      const prompt = processedArgs.join(' ');
-      response = await runCC({
-        prompt,
-        packageRoot,
-        taskId: this.currentTaskId
-      });
-    }
-    
-    console.log(`[Command] cc execution completed`);
-    
-    // Return the agent's response if available, otherwise pass through data
-    if (response) {
-      return { output: response, input: data };
-    }
-    return data;
-  }
   
   private parseTaskArgs(argsStr: string, data: any): any[] {
-    // Simply use new Function to parse the entire arguments as JavaScript
-    // This allows direct use of data.xxx without needing *data
-    const func = new Function('data', `return [${argsStr}]`);
-    return func(data);
+    // Use new Function to parse arguments with data and context
+    const parseContext = {
+      history: this.history,
+      taskId: this.currentTaskId,
+      task: this.currentTask
+    };
+    const func = new Function('data', 'context', `return [${argsStr}]`);
+    return func(data, parseContext);
   }
   
-  private parseCommandArgs(argsStr: string): string[] {
-    // Simple parsing for command arguments - split by comma but respect quotes
-    const args: string[] = [];
-    let current = '';
-    let inQuote = false;
-    let quoteChar = '';
-    
-    for (let i = 0; i < argsStr.length; i++) {
-      const char = argsStr[i];
-      
-      if (!inQuote && (char === '"' || char === "'")) {
-        inQuote = true;
-        quoteChar = char;
-        current += char;
-      } else if (inQuote && char === quoteChar && argsStr[i-1] !== '\\') {
-        inQuote = false;
-        current += char;
-      } else if (!inQuote && char === ',') {
-        args.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    
-    if (current.trim()) {
-      args.push(current.trim());
-    }
-    
-    return args;
-  }
-  
-  private buildCommandString(args: string[]): string {
-    if (args.length === 0) {
-      throw new Error('Command requires at least one argument');
-    }
-    
-    // Remove quotes from arguments if present
-    const cleanArgs = args.map(arg => {
-      if ((arg.startsWith('"') && arg.endsWith('"')) || 
-          (arg.startsWith("'") && arg.endsWith("'"))) {
-        return arg.slice(1, -1);
-      }
-      return arg;
-    });
-    
-    if (cleanArgs.length === 1) {
-      // Check if it's a filename (has extension) or a direct command
-      if (cleanArgs[0].match(/\.\w+$/)) {
-        // Single filename
-        return `@{${cleanArgs[0]}}`;
-      } else {
-        // Direct command
-        return `@{"${cleanArgs[0]}"}`;
-      }
-    } else if (cleanArgs.length === 2) {
-      // File + user input
-      return `@{${cleanArgs[0]} "${cleanArgs[1]}"}`;
-    }
-    
-    // Shouldn't happen, but fallback
-    return `@{${args.join(' ')}}`;
-  }
   
 
   start() {
@@ -386,6 +305,9 @@ class Pipeline {
 }
 
 async function main() {
+  // Register built-in processors
+  registerBuiltinProcessors();
+  
   const configFile = process.argv[2];
   
   if (!configFile) {
