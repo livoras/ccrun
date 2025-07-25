@@ -48,6 +48,19 @@ class Pipeline {
         } else if (item.startsWith('@{') && item.endsWith('}')) {
           // Command processor (quoted @{} syntax)
           this.processors.push({ type: 'command', handler: item });
+        } else if (item === 'json') {
+          // Built-in json processor
+          const jsonProcessorPath = resolve(__dirname, 'processors/json.js');
+          try {
+            const fileUrl = pathToFileURL(jsonProcessorPath).href;
+            const module = await import(fileUrl);
+            const handler = module.default;
+            this.processors.push({ type: 'function', handler });
+            console.log('[Pipeline] Loaded built-in json processor');
+          } catch (error) {
+            console.error(`Failed to load built-in json processor:`, error);
+            throw error;
+          }
         } else {
           // JS/TS file processor
           const filePath = this.resolveFilePath(item);
