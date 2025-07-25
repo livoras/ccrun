@@ -35,6 +35,7 @@ export interface ProcessorContext {
   history: any[];    // Array of all data states through the pipeline
   taskId?: string;   // Current task ID if available
   task?: any;        // Full task object if available
+  tools?: any;       // All registered processors as callable functions
 }
 
 // Processor function type

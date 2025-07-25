@@ -24,6 +24,57 @@ class Pipeline {
     this.actionClient = new ActionClient();
   }
 
+  private createTools() {
+    const tools: any = {};
+    const processorNames = ProcessorRegistry.getNames();
+    
+    for (const name of processorNames) {
+      const definition = ProcessorRegistry.get(name)!;
+      
+      if (definition.parseArgs) {
+        // For processors that accept arguments
+        tools[name] = (...args: any[]) => {
+          // Return a promise that will execute the processor
+          return new Promise(async (resolve) => {
+            const registryContext: ProcessorRegistryContext = {
+              actionClient: this.actionClient,
+              currentTaskId: this.currentTaskId,
+              configPath: this.configPath,
+              updateTask: async (taskId: number) => {
+                this.currentTask = await this.actionClient.getTask(taskId);
+              }
+            };
+            
+            const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
+            const currentData = this.history[this.history.length - 1];
+            const result = await handler(args, currentData, registryContext);
+            resolve(result);
+          });
+        };
+      } else {
+        // For simple processors (no arguments)
+        tools[name] = () => {
+          return new Promise((resolve) => {
+            const handler = definition.handler as ProcessorFunction;
+            const currentData = this.history[this.history.length - 1];
+            const context: ProcessorContext = {
+              history: [...this.history],
+              taskId: this.currentTaskId,
+              task: this.currentTask,
+              tools: this.createTools()
+            };
+            
+            handler(currentData, (newData) => {
+              resolve(newData);
+            }, context);
+          });
+        };
+      }
+    }
+    
+    return tools;
+  }
+
   async loadProcessors() {
     for (const item of this.config.run) {
       if (typeof item === 'string') {
@@ -165,7 +216,8 @@ class Pipeline {
         const context: ProcessorContext = {
           history: [...this.history], // Copy of history array
           taskId: this.currentTaskId,
-          task: this.currentTask
+          task: this.currentTask,
+          tools: this.createTools()
         };
         
         await new Promise<void>((resolve) => {
@@ -206,7 +258,8 @@ class Pipeline {
           const parseContext = {
             history: [...this.history],
             taskId: this.currentTaskId,
-            task: this.currentTask
+            task: this.currentTask,
+            tools: this.createTools()
           };
           const func = new Function('data', 'context', `return [${argsStr}]`);
           const parsedArgs = func(currentData, parseContext);
@@ -235,7 +288,8 @@ class Pipeline {
           const context: ProcessorContext = {
             history: [...this.history],
             taskId: this.currentTaskId,
-            task: this.currentTask
+            task: this.currentTask,
+            tools: this.createTools()
           };
           
           await new Promise<void>((resolve) => {
@@ -271,7 +325,8 @@ class Pipeline {
     const parseContext = {
       history: this.history,
       taskId: this.currentTaskId,
-      task: this.currentTask
+      task: this.currentTask,
+      tools: this.createTools()
     };
     const func = new Function('data', 'context', `return [${argsStr}]`);
     return func(data, parseContext);

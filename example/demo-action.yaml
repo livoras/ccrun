@@ -1,0 +1,18 @@
+name: Demo Action Processor
+description: Testing the action processor middleware
+type: webhook
+port: 3008
+path: /action-demo
+
+run:
+  - task("Action Demo", "Testing action execution")
+  # Example 1: Execute an action with current data as input
+  - action("some-action-id")
+  
+  # Example 2: Execute an action with custom input
+  - action("text-processor", { text: "Hello World", mode: "uppercase" })
+  
+  # Example 3: Execute an action with custom input and settings
+  - action("ai-analyzer", data, { temperature: 0.7, model: "gpt-4" })
+  
+  - log

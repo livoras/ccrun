@@ -1,0 +1,11 @@
+name: Demo Tools in Custom Processor
+description: Using context.tools in a custom processor
+type: crontab
+crontab: "*/10 * * * *"
+
+run:
+  - task("Custom Processor Demo", "Testing tools in custom processor")
+  - prompt("[1, 2, 3, 4, 5]")  # Generate some array data
+  - json
+  - ./process-with-tools.js  # Custom processor that uses tools
+  - log

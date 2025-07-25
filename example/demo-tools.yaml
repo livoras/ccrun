@@ -1,0 +1,13 @@
+name: Demo Tools in Context
+description: Demonstrating the use of context.tools
+type: webhook
+port: 3007
+path: /demo
+
+run:
+  - task("Tools Demo", "Testing context.tools functionality")
+  - prompt("Generate a list of 3 programming languages")
+  - json
+  # Use tools conditionally
+  - prompt(data.length > 2 ? context.tools.addTags("multi-item", "list") && "Added tags for multiple items" : "Single item, no tags added")
+  - log

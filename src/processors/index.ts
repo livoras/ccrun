@@ -5,6 +5,7 @@ import addTagsProcessor from './addTags';
 import removeTagsProcessor from './removeTags';
 import promptProcessor from './prompt';
 import agentProcessor from './agent';
+import actionProcessor from './action';
 
 /**
  * Register all built-in processors
@@ -46,6 +47,13 @@ export function registerBuiltinProcessors() {
   ProcessorRegistry.register({
     name: 'agent',
     handler: agentProcessor,
+    parseArgs: true
+  });
+  
+  // Action execution processor
+  ProcessorRegistry.register({
+    name: 'action',
+    handler: actionProcessor,
     parseArgs: true
   });
   
