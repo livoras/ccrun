@@ -21,6 +21,8 @@ ccrun()
     } else {
       ctx.data = await ctx.prompt(`Previous data was: ${JSON.stringify(ctx.history[ctx.history.length - 1])}`);
     }
+
+    await ctx.action('report', { markdown: 'OJBK' + ctx.state.counter })
     
     next();
   })
