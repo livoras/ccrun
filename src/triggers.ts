@@ -55,9 +55,7 @@ export class SSETrigger implements Trigger {
               try {
                 const data = JSON.parse(message);
                 console.log('[SSE] Received data:', data);
-                callback(data).catch(err => {
-                  console.error('[SSE] Callback error:', err);
-                });
+                callback(data);
               } catch (err) {
                 console.error('[SSE] Failed to parse message:', message, err);
               }
@@ -120,11 +118,7 @@ export class CrontabTrigger implements Trigger {
       
       console.log(`[Crontab] Triggered at ${data.timestamp}`);
       
-      try {
-        await callback(data);
-      } catch (err) {
-        console.error('[Crontab] Callback error:', err);
-      }
+      await callback(data);
     });
     
     this.task.start();

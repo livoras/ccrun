@@ -7,7 +7,7 @@ export class ActionClient {
   }
   
   async connect(): Promise<void> {
-    await fetch(`${this.baseUrl}/api/active-records`).catch(() => {});
+    await fetch(`${this.baseUrl}/api/active-records`);
   }
   
   private async httpRequest(method: string, endpoint: string, body?: object): Promise<any> {

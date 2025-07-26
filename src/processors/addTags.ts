@@ -1,6 +1,11 @@
-import { ProcessorRegistryContext } from '../processor-registry';
+import { ActionClient } from '../action-client';
 
-export default async function(args: any[], data: any, context: ProcessorRegistryContext) {
+interface ProcessorContext {
+  actionClient: ActionClient;
+  currentTaskId?: string;
+}
+
+export default async function(args: any[], data: any, context: ProcessorContext) {
   if (!context.currentTaskId) {
     throw new Error('addTags requires an active task. Use task() first.');
   }
@@ -16,7 +21,6 @@ export default async function(args: any[], data: any, context: ProcessorRegistry
   console.log(`[addTags] Adding tags: ${stringTags.join(', ')}`);
   
   await context.actionClient.addTaskTags(taskId, stringTags);
-  await context.updateTask(taskId);
   
   return data; // Pass through unchanged
 }

@@ -1,12 +1,11 @@
-import { Config, ProcessorFunction, ProcessorContext } from './types';
+import { Config } from './types';
 import { ActionClient } from './action-client';
 import { createTrigger, Trigger } from './triggers';
-import ProcessorRegistry, { ProcessorRegistryContext } from './processor-registry';
-import { registerBuiltinProcessors } from './processors/index';
-import { resolve as resolvePath } from 'path';
-
-// Ensure processors are registered
-registerBuiltinProcessors();
+import promptProcessor from './processors/prompt';
+import agentProcessor from './processors/agent';
+import actionProcessor from './processors/action';
+import addTagsProcessor from './processors/addTags';
+import removeTagsProcessor from './processors/removeTags';
 
 type WatchConfig = {
   type: 'sse' | 'crontab' | 'webhook';
@@ -90,70 +89,60 @@ export class CCRun {
       
       // Prompt processor
       prompt: async (prompt: string | any) => {
-        const definition = ProcessorRegistry.get('prompt');
-        if (!definition) throw new Error('prompt processor not found');
-        
-        const registryContext = this.createRegistryContext(executionContext);
-        const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
-        return await handler([prompt], ctx.data, registryContext);
+        return await promptProcessor([prompt], ctx.data, {
+          actionClient: this.actionClient,
+          currentTaskId: executionContext.taskId
+        });
       },
       
       // Agent processor
       agent: async (file: string, input?: string | any) => {
-        const definition = ProcessorRegistry.get('agent');
-        if (!definition) throw new Error('agent processor not found');
-        
-        const registryContext = this.createRegistryContext(executionContext);
-        const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         const args = input !== undefined ? [file, input] : [file];
-        return await handler(args, ctx.data, registryContext);
+        return await agentProcessor(args, ctx.data, {
+          actionClient: this.actionClient,
+          currentTaskId: executionContext.taskId
+        });
       },
       
       // Action processor
       action: async (actionId: string, input?: any, settings?: any) => {
-        const definition = ProcessorRegistry.get('action');
-        if (!definition) throw new Error('action processor not found');
-        
-        const registryContext = this.createRegistryContext(executionContext);
-        const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         const args = [actionId];
         if (input !== undefined) args.push(input);
         if (settings !== undefined) args.push(settings);
-        return await handler(args, ctx.data, registryContext);
+        return await actionProcessor(args, ctx.data, {
+          actionClient: this.actionClient,
+          currentTaskId: executionContext.taskId
+        });
       },
       
-      // JSON processor
+      // JSON processor - extracts and parses JSON from text
       json: async () => {
-        const definition = ProcessorRegistry.get('json');
-        if (!definition) throw new Error('json processor not found');
+        let textToParse: string;
         
-        return new Promise((resolve) => {
-          const handler = definition.handler as ProcessorFunction;
-          const processorContext: ProcessorContext = {
-            history: [...executionContext.history],
-            taskId: executionContext.taskId,
-            task: executionContext.task
-          };
-          
-          handler(ctx.data, (newData) => {
-            resolve(newData);
-          }, processorContext);
-        });
+        // Determine what text to parse
+        if (typeof ctx.data === 'object' && ctx.data !== null && 'output' in ctx.data) {
+          textToParse = String(ctx.data.output);
+        } else if (typeof ctx.data === 'string') {
+          textToParse = ctx.data;
+        } else {
+          throw new Error('json processor requires string or object with output field');
+        }
+        
+        // Extract JSON from ```json blocks
+        const jsonCodeBlockRegex = /```(?:json)?\s*\n([\s\S]*?)\n```/;
+        const match = textToParse.match(jsonCodeBlockRegex);
+        
+        if (match) {
+          return JSON.parse(match[1].trim());
+        }
+        
+        // Parse the entire text as JSON
+        return JSON.parse(textToParse.trim());
       },
       
       // Log processor
       log: () => {
-        const definition = ProcessorRegistry.get('log');
-        if (!definition) return;
-        
-        const handler = definition.handler as ProcessorFunction;
-        const processorContext: ProcessorContext = {
-          history: [...executionContext.history],
-          taskId: executionContext.taskId,
-          task: executionContext.task
-        };
-        
-        handler(ctx.data, () => {}, processorContext);
+        console.log('[data]', ctx.data);
       },
       
       // Tag management
@@ -162,12 +151,10 @@ export class CCRun {
           throw new Error('addTags requires an active task. Use ctx.task() first.');
         }
         
-        const definition = ProcessorRegistry.get('addTags');
-        if (!definition) throw new Error('addTags processor not found');
-        
-        const registryContext = this.createRegistryContext(executionContext);
-        const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
-        await handler(tags, ctx.data, registryContext);
+        await addTagsProcessor(tags, ctx.data, {
+          actionClient: this.actionClient,
+          currentTaskId: executionContext.taskId
+        });
         
         // Update current task
         if (executionContext.taskId) {
@@ -181,12 +168,10 @@ export class CCRun {
           throw new Error('removeTags requires an active task. Use ctx.task() first.');
         }
         
-        const definition = ProcessorRegistry.get('removeTags');
-        if (!definition) throw new Error('removeTags processor not found');
-        
-        const registryContext = this.createRegistryContext(executionContext);
-        const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
-        await handler(tags, ctx.data, registryContext);
+        await removeTagsProcessor(tags, ctx.data, {
+          actionClient: this.actionClient,
+          currentTaskId: executionContext.taskId
+        });
         
         // Update current task
         if (executionContext.taskId) {
@@ -199,16 +184,6 @@ export class CCRun {
     return ctx;
   }
 
-  private createRegistryContext(executionContext: { taskId?: string; task?: any }): ProcessorRegistryContext {
-    return {
-      actionClient: this.actionClient,
-      currentTaskId: executionContext.taskId,
-      configPath: resolvePath(process.cwd(), 'ccrun.js'), // Virtual path
-      updateTask: async (taskId: number) => {
-        executionContext.task = await this.actionClient.getTask(taskId);
-      }
-    };
-  }
 
   private async execute(initialData: any) {
     // Create execution context for this event
@@ -270,9 +245,7 @@ export class CCRun {
     }
     
     this.trigger.start(async (data) => {
-      await this.execute(data).catch(err => {
-        console.error('[CCRun] Execution error:', err);
-      });
+      await this.execute(data);
     });
   }
 

@@ -44,18 +44,13 @@ async function main() {
     process.exit(1);
   }
   
-  try {
-    await runCC({
-      prompt,
-      taskId,
-      filePath,
-      userInput,
-      packageRoot
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    process.exit(1);
-  }
+  await runCC({
+    prompt,
+    taskId,
+    filePath,
+    userInput,
+    packageRoot
+  });
 
 }
 

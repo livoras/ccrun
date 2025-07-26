@@ -1,6 +1,11 @@
-import { ProcessorRegistryContext } from '../processor-registry';
+import { ActionClient } from '../action-client';
 
-export default async function(args: any[], data: any, context: ProcessorRegistryContext) {
+interface ProcessorContext {
+  actionClient: ActionClient;
+  currentTaskId?: string;
+}
+
+export default async function(args: any[], data: any, context: ProcessorContext) {
   if (!Array.isArray(args) || args.length === 0) {
     throw new Error('action requires at least one argument (action ID)');
   }

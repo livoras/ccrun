@@ -1,12 +1,17 @@
-import { ProcessorRegistryContext } from '../processor-registry';
 import { runCC } from '../cc-core';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { ActionClient } from '../action-client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export default async function(args: any[], data: any, context: ProcessorRegistryContext) {
+interface ProcessorContext {
+  actionClient: ActionClient;
+  currentTaskId?: string;
+}
+
+export default async function(args: any[], data: any, context: ProcessorContext) {
   if (!Array.isArray(args) || args.length === 0) {
     throw new Error('agent requires at least one argument (file path)');
   }
@@ -18,9 +23,8 @@ export default async function(args: any[], data: any, context: ProcessorRegistry
   
   console.log(`[agent] Executing file: ${filePath}${userInput ? ` with input: ${userInput.substring(0, 50)}...` : ''}`);
   
-  // Resolve file path relative to config
-  const configDir = dirname(context.configPath);
-  const fullFilePath = resolve(configDir, filePath);
+  // Resolve file path relative to current directory
+  const fullFilePath = resolve(process.cwd(), filePath);
   
   // Always use the actual project root
   const packageRoot = resolve(__dirname, '../..');

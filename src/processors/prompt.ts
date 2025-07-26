@@ -1,12 +1,17 @@
-import { ProcessorRegistryContext } from '../processor-registry';
 import { runCC } from '../cc-core';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { ActionClient } from '../action-client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export default async function(args: any[], data: any, context: ProcessorRegistryContext) {
+interface ProcessorContext {
+  actionClient: ActionClient;
+  currentTaskId?: string;
+}
+
+export default async function(args: any[], data: any, context: ProcessorContext) {
   if (!Array.isArray(args) || args.length !== 1) {
     throw new Error('prompt requires exactly one argument');
   }
