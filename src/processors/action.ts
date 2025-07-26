@@ -11,21 +11,16 @@ export default async function(args: any[], data: any, context: ProcessorRegistry
   
   console.log(`[action] Executing action: ${actionId}`);
   
-  try {
-    // Execute the action
-    const result = await context.actionClient.executeAction(
-      actionId,
-      input,
-      settings,
-      context.currentTaskId ? parseInt(context.currentTaskId) : undefined
-    );
-    
-    console.log(`[action] Action ${actionId} completed successfully`);
-    
-    // Return the action result
-    return result;
-  } catch (error) {
-    console.error(`[action] Action ${actionId} failed:`, error);
-    throw error;
-  }
+  // Execute the action
+  const result = await context.actionClient.executeAction(
+    actionId,
+    input,
+    settings,
+    context.currentTaskId ? parseInt(context.currentTaskId) : undefined
+  );
+  
+  console.log(`[action] Action ${actionId} completed successfully`);
+  
+  // Return the action result
+  return result;
 }

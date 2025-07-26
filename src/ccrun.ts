@@ -27,9 +27,9 @@ interface CCRunContext {
   taskId?: string;
   taskData?: any;  // Current task data
   // Built-in functions
-  task: (name: string, description?: string, tags?: string[]) => Promise<void>;
-  prompt: (prompt: string) => Promise<any>;
-  agent: (file: string, input?: string) => Promise<any>;
+  task: (name: string, description?: string, tags?: string[], logo?: string) => Promise<void>;
+  prompt: (prompt: string | any) => Promise<any>;
+  agent: (file: string, input?: string | any) => Promise<any>;
   action: (actionId: string, input?: any, settings?: any) => Promise<any>;
   json: () => Promise<any>;
   log: () => void;
@@ -44,9 +44,6 @@ export class CCRun {
   private middlewares: MiddlewareFunction[] = [];
   private actionClient: ActionClient;
   private trigger?: Trigger;
-  private currentTaskId?: string;
-  private currentTask: any = null;
-  private history: any[] = [];
 
   constructor() {
     this.actionClient = new ActionClient();
@@ -66,47 +63,47 @@ export class CCRun {
     return this;
   }
 
-  private createContext(data: any): CCRunContext {
+  private createContext(data: any, executionContext: { taskId?: string; task?: any; history: any[] }): CCRunContext {
     const ctx: CCRunContext = {
       data,
       state: {},
-      history: [...this.history],
-      taskId: this.currentTaskId,
-      taskData: this.currentTask,
+      history: [...executionContext.history],
+      taskId: executionContext.taskId,
+      taskData: executionContext.task,
       
       // Task creation
-      task: async (name: string, description?: string, tags?: string[]) => {
+      task: async (name: string, description?: string, tags?: string[], logo?: string) => {
         const projectPath = process.cwd();
         const result = await this.actionClient.createTask(
           name,
           description,
           tags,
-          undefined,
+          logo,
           projectPath
         );
-        this.currentTaskId = result.id.toString();
-        this.currentTask = result;
-        ctx.taskId = this.currentTaskId;
+        executionContext.taskId = result.id.toString();
+        executionContext.task = result;
+        ctx.taskId = executionContext.taskId;
         ctx.taskData = result;
-        console.log(`[CCRun] Task created with ID: ${this.currentTaskId}, name: ${name}`);
+        console.log(`[CCRun] Task created with ID: ${executionContext.taskId}, name: ${name}`);
       },
       
       // Prompt processor
-      prompt: async (prompt: string) => {
+      prompt: async (prompt: string | any) => {
         const definition = ProcessorRegistry.get('prompt');
         if (!definition) throw new Error('prompt processor not found');
         
-        const registryContext = this.createRegistryContext();
+        const registryContext = this.createRegistryContext(executionContext);
         const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         return await handler([prompt], ctx.data, registryContext);
       },
       
       // Agent processor
-      agent: async (file: string, input?: string) => {
+      agent: async (file: string, input?: string | any) => {
         const definition = ProcessorRegistry.get('agent');
         if (!definition) throw new Error('agent processor not found');
         
-        const registryContext = this.createRegistryContext();
+        const registryContext = this.createRegistryContext(executionContext);
         const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         const args = input !== undefined ? [file, input] : [file];
         return await handler(args, ctx.data, registryContext);
@@ -117,7 +114,7 @@ export class CCRun {
         const definition = ProcessorRegistry.get('action');
         if (!definition) throw new Error('action processor not found');
         
-        const registryContext = this.createRegistryContext();
+        const registryContext = this.createRegistryContext(executionContext);
         const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         const args = [actionId];
         if (input !== undefined) args.push(input);
@@ -133,9 +130,9 @@ export class CCRun {
         return new Promise((resolve) => {
           const handler = definition.handler as ProcessorFunction;
           const processorContext: ProcessorContext = {
-            history: [...this.history],
-            taskId: this.currentTaskId,
-            task: this.currentTask
+            history: [...executionContext.history],
+            taskId: executionContext.taskId,
+            task: executionContext.task
           };
           
           handler(ctx.data, (newData) => {
@@ -151,9 +148,9 @@ export class CCRun {
         
         const handler = definition.handler as ProcessorFunction;
         const processorContext: ProcessorContext = {
-          history: [...this.history],
-          taskId: this.currentTaskId,
-          task: this.currentTask
+          history: [...executionContext.history],
+          taskId: executionContext.taskId,
+          task: executionContext.task
         };
         
         handler(ctx.data, () => {}, processorContext);
@@ -161,40 +158,40 @@ export class CCRun {
       
       // Tag management
       addTags: async (...tags: string[]) => {
-        if (!this.currentTaskId) {
+        if (!executionContext.taskId) {
           throw new Error('addTags requires an active task. Use ctx.task() first.');
         }
         
         const definition = ProcessorRegistry.get('addTags');
         if (!definition) throw new Error('addTags processor not found');
         
-        const registryContext = this.createRegistryContext();
+        const registryContext = this.createRegistryContext(executionContext);
         const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         await handler(tags, ctx.data, registryContext);
         
         // Update current task
-        if (this.currentTaskId) {
-          this.currentTask = await this.actionClient.getTask(parseInt(this.currentTaskId));
-          ctx.taskData = this.currentTask;
+        if (executionContext.taskId) {
+          executionContext.task = await this.actionClient.getTask(parseInt(executionContext.taskId));
+          ctx.taskData = executionContext.task;
         }
       },
       
       removeTags: async (...tags: string[]) => {
-        if (!this.currentTaskId) {
+        if (!executionContext.taskId) {
           throw new Error('removeTags requires an active task. Use ctx.task() first.');
         }
         
         const definition = ProcessorRegistry.get('removeTags');
         if (!definition) throw new Error('removeTags processor not found');
         
-        const registryContext = this.createRegistryContext();
+        const registryContext = this.createRegistryContext(executionContext);
         const handler = definition.handler as (args: any[], data: any, context: ProcessorRegistryContext) => Promise<any>;
         await handler(tags, ctx.data, registryContext);
         
         // Update current task
-        if (this.currentTaskId) {
-          this.currentTask = await this.actionClient.getTask(parseInt(this.currentTaskId));
-          ctx.taskData = this.currentTask;
+        if (executionContext.taskId) {
+          executionContext.task = await this.actionClient.getTask(parseInt(executionContext.taskId));
+          ctx.taskData = executionContext.task;
         }
       }
     };
@@ -202,29 +199,26 @@ export class CCRun {
     return ctx;
   }
 
-  private createRegistryContext(): ProcessorRegistryContext {
+  private createRegistryContext(executionContext: { taskId?: string; task?: any }): ProcessorRegistryContext {
     return {
       actionClient: this.actionClient,
-      currentTaskId: this.currentTaskId,
+      currentTaskId: executionContext.taskId,
       configPath: resolvePath(process.cwd(), 'ccrun.js'), // Virtual path
       updateTask: async (taskId: number) => {
-        this.currentTask = await this.actionClient.getTask(taskId);
+        executionContext.task = await this.actionClient.getTask(taskId);
       }
     };
   }
 
   private async execute(initialData: any) {
-    this.history = [initialData];
+    // Create execution context for this event
+    const executionContext = {
+      taskId: undefined as string | undefined,
+      task: undefined as any,
+      history: [initialData]
+    };
+    
     let currentData = initialData;
-
-    // Get task info if we have a task ID
-    if (this.currentTaskId) {
-      try {
-        this.currentTask = await this.actionClient.getTask(parseInt(this.currentTaskId));
-      } catch (error) {
-        console.error('[CCRun] Failed to get task info:', error);
-      }
-    }
 
     // Execute middleware chain
     let index = 0;
@@ -233,7 +227,7 @@ export class CCRun {
       if (index >= this.middlewares.length) return;
       
       const middleware = this.middlewares[index++];
-      const ctx = this.createContext(currentData);
+      const ctx = this.createContext(currentData, executionContext);
       
       // Set up next function
       let nextCalled = false;
@@ -245,23 +239,18 @@ export class CCRun {
         
         // Update current data from context
         currentData = ctx.data;
-        this.history.push(currentData);
+        executionContext.history.push(currentData);
         
         // Continue to next middleware
         await runNext();
       };
       
       // Execute middleware
-      try {
-        await middleware(ctx, next);
-        
-        // If next wasn't called, stop here
-        if (!nextCalled) {
-          console.log('[CCRun] Middleware chain stopped (next not called)');
-        }
-      } catch (error) {
-        console.error('[CCRun] Middleware error:', error);
-        throw error;
+      await middleware(ctx, next);
+      
+      // If next wasn't called, stop here
+      if (!nextCalled) {
+        console.log('[CCRun] Middleware chain stopped (next not called)');
       }
     };
     

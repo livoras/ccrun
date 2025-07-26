@@ -1,6 +1,10 @@
 import { ProcessorRegistryContext } from '../processor-registry';
 import { runCC } from '../cc-core';
 import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export default async function(args: any[], data: any, context: ProcessorRegistryContext) {
   if (!Array.isArray(args) || args.length === 0) {
@@ -8,7 +12,9 @@ export default async function(args: any[], data: any, context: ProcessorRegistry
   }
   
   const filePath = String(args[0]);
-  const userInput = args.length > 1 ? String(args[1]) : undefined;
+  const userInput = args.length > 1 ? 
+    (typeof args[1] === 'object' ? JSON.stringify(args[1]) : String(args[1])) : 
+    undefined;
   
   console.log(`[agent] Executing file: ${filePath}${userInput ? ` with input: ${userInput.substring(0, 50)}...` : ''}`);
   

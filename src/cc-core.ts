@@ -3,6 +3,11 @@ import { remoteConsole } from './logger';
 import { replaceAtMarks } from './replaceAtMarks';
 import path from 'path';
 import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 interface CCOptions {
   prompt?: string;
@@ -32,14 +37,9 @@ export async function runCC(options: CCOptions): Promise<string | void> {
   
   // 如果指定了文件，从文件读取内容
   if (filePath) {
-    try {
-      const fileContent = await fs.readFile(filePath, 'utf-8');
-      // 如果有用户输入，组合文件内容和用户输入
-      prompt = userInput ? `${fileContent}\n\n<userInput>${userInput}</userInput>` : fileContent;
-    } catch (error) {
-      console.error(`Error reading file: ${filePath}`, error);
-      throw error;
-    }
+    const fileContent = await fs.readFile(filePath, 'utf-8');
+    // 如果有用户输入，组合文件内容和用户输入
+    prompt = userInput ? `${fileContent}\n\n<userInput>${userInput}</userInput>` : fileContent;
   }
   
   if (!prompt) {
